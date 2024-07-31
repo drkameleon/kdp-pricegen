@@ -1,0 +1,161 @@
+; Data
+
+VAT: #[ ; percentages (%)
+    paperback: #[
+        de: 7.0    fr: 5.5
+        es: 4.0    it: 4.0
+        nl: 9.0    pl: 5.0
+        se: 6.0    au: 10.0
+        jp: 10.0
+    ]
+]
+
+; Helpers
+
+choose: function [what,cases][
+    else: what
+    loop @ cases [condition,action][
+        if what = condition [
+            do action
+            break
+        ]
+    ]
+]
+
+; Methods
+
+looksGood?: function [z, cntr][
+    print ["Checking" z "for country:" cntr]
+    sz: (cntr = 'jp)? -> to :string to :integer z
+                      -> to :string .format:".2f" round.to: 2 z
+
+    print ["\tsz:" sz]
+
+    toCheck: ["99", "49"]
+    if not? null? attr 'lax -> toCheck: toCheck ++ ["98" "47"]
+    return some? toCheck 'zz -> suffix? sz zz
+]
+
+getRoyalty: function [ltPrice, pCost][
+    return (0.6 * ltPrice) - pCost
+]
+
+getPrintingCost: function [pcnt, cntr][
+    ; https://kdp.amazon.com/en_US/help/topic/G201834340
+    costBySize: function [a,b][
+        (pcnt < 109)? -> a -> b
+    ]
+    [fixed, perPage]: choose cntr [
+        'ca -> costBySize [2.99`CAD, 0`CAD]  [1.26`CAD, 0.016`CAD]
+        'jp -> costBySize [422`JPY, 0`JPY]   [206`JPY, 2`JPY]
+        'uk -> costBySize [1.93`GBP, 0`GBP]  [0.85`GBP, 0.010`GBP]
+        'us -> costBySize [2.30`USD, 0`USD]  [1.0`USD, 0.012`USD]
+        'au -> costBySize [4.74`AUD, 0`AUD]  [2.42`AUD, 0.022`AUD]
+        'pl -> costBySize [9.58`PLN, 0`PLN]  [3.51`PLN, 0.056`PLN]
+        'se -> costBySize [22.84`SEK, 0`SEK] [8.37`SEK, 0.134`SEK]
+        else -> ; de/es/fr/it/nl
+            costBySize [2.05`EUR, 0`EUR] [0.75`EUR, 0.012`EUR]
+    ]
+    return fixed + perPage * pcnt
+]
+
+getStep: function [pr, targetCountry][
+    (targetCountry = 'jp) ? -> 1
+                            -> 0.01
+]
+
+getMinimumListPrice: function [nofPages, desiredProfit, targetCountry][
+    return ((desiredProfit + prc) / 0.6) --> units 
+        prc: <= getPrintingCost nofPages targetCountry
+]
+
+
+
+getVat: function [cntr][
+    vatToApply: 1
+    if key? VAT\paperback cntr ->
+        vatToApply: vatToApply + VAT\paperback\[cntr] / 100
+    return vatToApply
+]
+
+getIdealListPrice: function [nofPages, desiredProfit, targetCountry][
+    minimumListPrice: getMinimumListPrice nofPages desiredProfit targetCountry
+    step: getStep minimumListPrice targetCountry
+    vatToApply: getVat targetCountry
+
+    curr: to :floating round.to: 2 to :floating scalar minimumListPrice
+
+    ;print ["curr for:" targetCountry "is:" curr]
+
+    while [true][
+        currv: curr * vatToApply
+        stringified: to :string (targetCountry = 'jp)? -> to :integer currv
+                                                       -> round.to: 2 currv
+
+        ;if xor? [targetCountry = 'jp][2 = size last split.by:"." stringified][
+            if some? ["49" "99"] 'zz -> suffix? stringified zz 
+                -> return curr
+        ;]
+
+        curr: curr + step
+        ;print ["curr for:" targetCountry "is:" curr]
+    ]
+]
+
+; getIdealListPrice: function [nofPages, desiredProfit, targetCountry][
+;     minimumListPrice: getMinimumListPrice nofPages desiredProfit targetCountry
+
+;     mlpBefore: minimumListPrice
+;     step: getStep minimumListPrice targetCountry
+;     vatToApply: getVat targetCountry
+
+;     i: 0
+;     while [i < 100][
+;         minimumListPrice: minimumListPrice + step
+;         if looksGood? (to :floating scalar minimumListPrice) * vatToApply targetCountry ->
+;             return minimumListPrice
+;         i: i + 1
+;     ]
+;     i: 0
+;     minimumListPrice: mlpBefore
+;     while [i < 100][
+;         minimumListPrice: minimumListPrice + step
+;         if looksGood?.lax (to :floating scalar minimumListPrice) * vatToApply targetCountry ->
+;             return minimumListPrice
+;         i: i + 1
+;     ]
+; ]
+
+nicePrice: function [num, cntr][
+    (cntr = "jp")? -> to :string to :integer to :floating num
+                   -> to :string .format:".2f" to :floating num
+                   
+]
+getAllPrices: function [np, pr][
+    res: #[]
+    countries: ['us 'uk 'de 'fr 'es 'it 'nl 'pl 'se 'jp 'ca 'au]
+
+    loop countries 'country [
+        res\[country]: getIdealListPrice np pr country
+    ]
+
+    return res
+]
+
+; Main
+
+if standalone? [
+    numPages: to :integer arg\1
+    profit: do arg\0
+
+    js: ""
+    loop getAllPrices numPages profit [k,v][
+        print [k "=>" round.to: 2 v * getVat k]
+        js: js ++ ~{!js
+            document.getElementsByName("data[print_book][amazon_channel][|k|][price_vat_exclusive]")[0].value = "|nicePrice v k|";
+        } ++ "\n"
+    ]
+    print "-----"
+    print js
+    clip js
+]
