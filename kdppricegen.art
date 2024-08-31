@@ -145,6 +145,9 @@ getAllPrices: function [np, pr][
 ; Main
 
 if standalone? [
+    if not? 2 = size arg [
+        panic "Syntax: kdppricegen.art <number of pages> <profit>"
+    ]
     numPages: to :integer arg\1
     profit: do arg\0
 
